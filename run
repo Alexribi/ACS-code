@@ -1,0 +1,281 @@
+import numpy as np
+import matplotlib.pyplot as plt
+from quaternion import simulate_attitude
+from fieldcalc import field_calc
+import datetime
+from scipy.interpolate import interp1d
+import transformations
+
+# TLE do satélite
+s = '1 60235U 24128A   25239.97563584  .00004238  00000+0  34996-3 0  9991'
+t = '2 60235  61.9946 169.7284 0062604  68.9440 291.8329 14.99093989 62013'
+
+# Parâmetros da simulação
+num_points = 570000  # quantidade de pontos na órbita
+start_date = datetime.datetime(2026, 10, 9, 12, 0, 0)
+mu_0 = 4 * np.pi * 1e-7
+
+# ===== 1. Simulação do Campo Magnético =====
+delta_t, times, east, north, down, Hx, Hy, Hz, lats, lons, alts = field_calc(s, t, num_points, start_date, mu_0)
+
+# Plot dos componentes originais (opcional)
+plt.figure(figsize=(10, 8))
+plt.plot(times, east, label='East (G)', marker='o')
+plt.plot(times, north, label='North (G)', marker='s')
+plt.plot(times, down, label='Down (G)', marker='^')
+plt.title('Componentes do Campo Magnético (WMM2020)')
+plt.xlabel('Tempo')
+plt.ylabel('Intensidade (Gauss)')
+plt.grid(True)
+plt.legend()
+plt.xticks(rotation=45)
+plt.tight_layout()
+plt.show()
+
+plt.figure(figsize=(10, 8))
+plt.plot(times, Hx, label='East (G)', marker='o')
+plt.plot(times, Hy, label='North (G)', marker='s')
+plt.plot(times, Hz, label='Down (G)', marker='^')
+plt.title('Componentes do Campo Magnético (WMM2020)')
+plt.xlabel('Tempo')
+plt.ylabel('Intensidade (A/m)')
+plt.grid(True)
+plt.legend()
+plt.xticks(rotation=45)
+plt.tight_layout()
+plt.show()
+
+# ===== 2. Conversão para Sistema ECI =====
+# Calcular JD para cada tempo
+jds = []
+for t in times:
+    jd, fr = transformations.jday(t.year, t.month, t.day, 
+                                 t.hour, t.minute, t.second + t.microsecond/1e6)
+    jds.append(jd + fr)
+
+# Converter campo magnético de NED para ECI
+mag_eci = []
+for i in range(len(times)):
+    # Monta vetor NED [North, East, Down]
+    v_ned = np.array([north[i], east[i], down[i]])
+    
+    # Converte NED → ECEF → ECI
+    v_ecef = transformations.ned_to_ecef(lats[i], lons[i], v_ned)
+    v_eci = transformations.ecef_to_eci(v_ecef, jds[i])
+    mag_eci.append(v_eci)
+
+mag_eci = np.array(mag_eci)
+
+H_eci = []
+for i in range(len(times)):
+    # Monta vetor NED [North, East, Down]
+    vh_ned = np.array([Hx[i], Hy[i], Hz[i]])
+    
+    # Converte NED → ECEF → ECI
+    vh_ecef = transformations.ned_to_ecef(lats[i], lons[i], vh_ned)
+    vh_eci = transformations.ecef_to_eci(vh_ecef, jds[i])
+    H_eci.append(vh_eci)
+
+H_eci = np.array(H_eci)
+
+H_eci_derivative = []
+for i in range(len(times)):
+    if i > 0:
+        # Calcula a derivada numérica
+        deriv = (H_eci[i] - H_eci[i - 1])
+        H_eci_derivative.append(deriv)
+    else:
+        H_eci_derivative.append(np.zeros(3))    
+
+H_eci_derivative = np.array(H_eci_derivative)
+
+H_eci_time_derivative = []
+for i in range(len(times)):
+    if i > 0:
+        # Calcula a derivada numérica
+        derivt = (H_eci_derivative[i]) / (times[i] - times[i - 1]).total_seconds()
+        H_eci_time_derivative.append(derivt)
+    else:
+        H_eci_time_derivative.append(np.zeros(3))
+
+H_eci_time_derivative = np.array(H_eci_time_derivative)
+
+# ===== 3. Simulação de Atitude =====
+# Configurações do usuário
+I = [0.00551, 0.02552, 0.02565]   # Momentos de inércia [kg*m²]
+omega0 = [10, 5, 5]                      # Velocidade angular inicial [rad/s]
+q0 = [1, 0, 0, 0] 	      	            # Quaternions iniciais
+dt = delta_t                            # Passo de tempo [s]
+num_orbits = 1                          # Duração total [s] (1.5 horas)
+
+# Parâmetros do modelo de histerese
+Hcoercivity = 0.96                     # Coercividade (A/m)
+Hremanence = 0.35                       # Remanência (T)
+Hsaturation = 0.74                # Saturação do campo (T)
+Hvolume = (1**2)*np.pi*(10**-9)               # Volume (m³)
+Hdirection_1 = np.array([0, 0, 1])      # Direção do campo (unitário)
+Hdirection_2 = np.array([0, 1, 0])      # Direção do campo (unitário)
+
+# Condições iniciais dos ímãs permanentes
+remanence = 1.3                         # Remanência (T)
+volume = (mu_0*0.3)/remanence                # Volume do material magnético
+direction = np.array([0, 0, -1])         # Direção do campo magnético
+
+
+
+j = 0
+
+# Executa simulação de atitude
+time_hist, omega_hist, quat_hist, Htorque_hist, Itorque_hist, torque_hist, Bbody_hist = simulate_attitude(I, omega0, q0, dt, num_orbits, num_points, i, j, Hcoercivity, Hremanence, Hsaturation, Hvolume, Hdirection_1, Hdirection_2, remanence, direction, volume, mag_eci, H_eci, H_eci_time_derivative, H_eci_derivative)
+
+# Plot dos quaternions (opcional)
+plt.figure(figsize=(10, 6))
+plt.plot(time_hist, quat_hist[:, 0], label='q0', color='blue')
+plt.plot(time_hist, quat_hist[:, 1], label='q1', color='green')
+plt.plot(time_hist, quat_hist[:, 2], label='q2', color='red')
+plt.plot(time_hist, quat_hist[:, 3], label='q3', color='purple')
+plt.xlabel('Tempo (s)')
+plt.ylabel('Quaternions')
+plt.title('Evolução da Atitude (Quaternion)')
+plt.legend()
+plt.grid()
+plt.tight_layout()
+plt.show()
+
+plt.figure(figsize=(10, 6))
+plt.plot(time_hist, omega_hist[:, 0], label='ωx', color='blue')
+plt.plot(time_hist, omega_hist[:, 1], label='ωy', color='green')
+plt.plot(time_hist, omega_hist[:, 2], label='ωz', color='red')
+plt.xlabel('Tempo (s)')
+plt.ylabel('Velocidade Angular (rad/s)')
+plt.title('Evolução da Atitude (Velocidade Angular)')
+plt.legend()
+plt.grid()
+plt.tight_layout()
+plt.show()
+
+plt.figure(figsize=(10, 6))
+plt.plot(time_hist, Bbody_hist[:, 0], label='Bbody_x', color='blue')
+plt.plot(time_hist, Bbody_hist[:, 1], label='Bbody_y', color='green')
+plt.plot(time_hist, Bbody_hist[:, 2], label='Bbody_z', color='red')
+plt.xlabel('Tempo (s)')
+plt.ylabel('Campo Magnético (Gauss)')
+plt.title('Evolução do Campo Magnético do Corpo')
+plt.legend()
+plt.grid()
+plt.tight_layout()
+plt.show()
+
+plt.figure(figsize=(10, 6))
+plt.plot(time_hist, Itorque_hist[:, 0], label='Itorque_x', color='yellow')
+plt.plot(time_hist, Itorque_hist[:, 1], label='Itorque_y', color='black')
+plt.plot(time_hist, Itorque_hist[:, 2], label='Itorque_z', color='pink')
+plt.plot(time_hist, Htorque_hist[:, 0], label='Htorque_x', color='cyan')
+plt.plot(time_hist, Htorque_hist[:, 1], label='Htorque_y', color='magenta')
+plt.plot(time_hist, Htorque_hist[:, 2], label='Htorque_z', color='orange')
+plt.plot(time_hist, torque_hist[:, 0], label='torque_x', color='blue')
+plt.plot(time_hist, torque_hist[:, 1], label='torque_y', color='green')
+plt.plot(time_hist, torque_hist[:, 2], label='torque_z', color='red')
+plt.xlabel('Tempo (s)')
+plt.ylabel('Torque (Nm)')
+plt.title('Evolução da Atitude (Torque)')
+plt.legend()
+plt.grid()
+plt.tight_layout()
+plt.show()
+
+
+# ===== 4. Processamento Conjunto =====
+# Converter tempos orbitais para segundos
+t0 = start_date
+time_sec = [(t - t0).total_seconds() for t in times]
+
+# Interpolar campo magnético ECI para os tempos da simulação de atitude
+interp_x = interp1d(time_sec, mag_eci[:, 0], kind='linear', fill_value="extrapolate")
+interp_y = interp1d(time_sec, mag_eci[:, 1], kind='linear', fill_value="extrapolate")
+interp_z = interp1d(time_sec, mag_eci[:, 2], kind='linear', fill_value="extrapolate")
+
+# Obter valores interpolados
+mag_x = interp_x(time_hist)
+mag_y = interp_y(time_hist)
+mag_z = interp_z(time_hist)
+
+# Rotacionar para sistema de corpo usando quaternions
+mag_body = []
+for i in range(len(time_hist)):
+    # Obter matriz de rotação do quaternion
+    R = transformations.quat_to_rot_matrix(quat_hist[i])
+    
+    # Vetor campo magnético em ECI
+    v_eci = np.array([mag_x[i], mag_y[i], mag_z[i]])
+    
+    # Rotacionar para sistema de corpo
+    v_body = R @ v_eci
+    mag_body.append(v_body)
+
+mag_body = np.array(mag_body)
+
+
+
+# ===== 5. Visualização dos Resultados =====
+plt.figure(figsize=(14, 10))
+
+# Gráfico do campo magnético em ECI
+plt.subplot(2, 1, 1)
+plt.plot(time_hist, mag_x, 'r--', label='ECI X')
+plt.plot(time_hist, mag_y, 'g--', label='ECI Y')
+plt.plot(time_hist, mag_z, 'b--', label='ECI Z')
+plt.title('Campo Magnético no Sistema Inercial (ECI)')
+plt.ylabel('Intensidade (Gauss)')
+plt.legend()
+plt.grid(True)
+
+# Gráfico do campo magnético em sistema de corpo
+plt.subplot(2, 1, 2)
+plt.plot(time_hist, mag_body[:, 0], 'r-', label='Body X')
+plt.plot(time_hist, mag_body[:, 1], 'g-', label='Body Y')
+plt.plot(time_hist, mag_body[:, 2], 'b-', label='Body Z')
+plt.title('Campo Magnético no Sistema de Corpo do Satélite')
+plt.xlabel('Tempo (s)')
+plt.ylabel('Intensidade (Gauss)')
+plt.legend()
+plt.grid(True)
+
+plt.tight_layout()
+plt.show()
+
+# Gráfico 3D da trajetória do campo magnético no sistema de corpo
+fig = plt.figure(figsize=(8, 6))
+ax = fig.add_subplot(111, projection='3d')
+ax.plot(mag_body[:, 0], mag_body[:, 1], mag_body[:, 2])
+ax.set_xlabel('Eixo X (Gauss)')
+ax.set_ylabel('Eixo Y (Gauss)')
+ax.set_zlabel('Eixo Z (Gauss)')
+ax.set_title('Trajetória do Campo Magnético no Sistema de Corpo')
+plt.tight_layout()
+plt.show()
+
+# ===== 6. Análise Complementar =====
+# Calcular magnitude total do campo magnético
+mag_total = np.linalg.norm(mag_body, axis=1)
+
+plt.figure(figsize=(8, 6))
+plt.plot(time_hist, mag_total, 'm-', linewidth=2)
+plt.title('Magnitude Total do Campo Magnético')
+plt.xlabel('Tempo (s)')
+plt.ylabel('Intensidade (Gauss)')
+plt.grid(True)
+plt.tight_layout()
+plt.show()
+
+# Calcular variações por eixo
+variation_x = np.max(mag_body[:, 0]) - np.min(mag_body[:, 0])
+variation_y = np.max(mag_body[:, 1]) - np.min(mag_body[:, 1])
+variation_z = np.max(mag_body[:, 2]) - np.min(mag_body[:, 2])
+
+print("\nAnálise do Campo Magnético no Sistema de Corpo:")
+print(f"Variação no eixo X: {variation_x:.6f} Gauss")
+print(f"Variação no eixo Y: {variation_y:.6f} Gauss")
+print(f"Variação no eixo Z: {variation_z:.6f} Gauss")
+print(f"Média da magnitude: {np.mean(mag_total):.6f} Gauss")
+print(f"Variação total: {np.max(mag_total) - np.min(mag_total):.6f} Gauss")
