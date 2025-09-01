@@ -1,0 +1,199 @@
+import numpy as np
+import transformations
+
+def simulate_attitude(I, omega0, q0, dt, num_orbits, num_points, i, j, Hcoercivity, Hremanence, Hsaturation, Hvolume, Hdirection_1, Hdirection_2, remanence, direction, volume, mag_eci, H_eci, H_eci_time_derivative, H_eci_derivative):
+    """
+    Simula a evolução da atitude de um corpo rígido usando quaternions com integração RK4.
+
+    Parâmetros:
+    - I: array-like, [Ixx, Iyy, Izz] (kg*m²)
+    - omega0: array-like, [ωx, ωy, ωz] inicial (rad/s)
+    - q0: array-like, quaternion inicial [q0, q1, q2, q3]
+    - M: array-like, torques aplicados [Mx, My, Mz]
+    - dt: float, passo de tempo (s)
+    - T: float, duração total (s)
+
+    Retorna:
+    - time_hist: array com os instantes de tempo
+    - omega_hist: histórico das velocidades angulares
+    - quat_hist: histórico dos quaternions
+    """
+
+    Ixx, Iyy, Izz = I
+    omega = np.array(omega0, dtype=float)
+    q = np.array(q0, dtype=float)
+    steps = int(num_points)
+    
+
+    torque_hist = []
+    Itorque_hist = []
+    Htorque_hist = []
+    omega_hist = []
+    quat_hist = []
+    time_hist = []
+    Bbody_hist = []
+
+    def HysteresisRod(Hcoercivity,Hremanence, Hsaturation):
+        
+        HB_1 = 0
+        state_1 = np.tan(HB_1*np.pi/(2*Hsaturation))
+        
+        HB_2 = 0
+        state_2 = np.tan(HB_2*np.pi/(2*Hsaturation))
+
+        k = (1/Hcoercivity)*np.tan(0.5*np.pi*Hremanence/Hsaturation)
+        velocity = np.zeros(Hdirection_1.size) + np.zeros(Hdirection_2.size)
+        Htorque = np.zeros(3)
+        return HB_1, HB_2, state_1, state_2, k, velocity, Htorque
+
+    def inicial_posicion_Rods(q, Hdirection_1, Hdirection_2, direction):
+        r = transformations.quat_to_rot_matrix(q)
+        direction_1 = r @ Hdirection_1
+        direction_2 = r @ Hdirection_2
+        direction_0 = r @ direction
+        return direction_1, direction_2, direction_0
+
+    def Rod_initial_condition(H_eci, H_eci_time_derivative, direction_1, direction_2, Hcoercivity, Hsaturation, k, i):
+        H_projection_1 = np.dot(H_eci[i], direction_1)
+        H_time_derivative_projection_1 = np.dot(H_eci_time_derivative[i], direction_1)
+        H_projection_2 = np.dot(H_eci[i], direction_2)
+        H_time_derivative_projection_2 = np.dot(H_eci_time_derivative[i], direction_2)
+
+        if H_time_derivative_projection_1 >= 0:
+            HB_1 = Hsaturation*(2/np.pi)*np.arctan(k*(H_projection_1 - Hcoercivity))
+        else:
+            HB_1 = Hsaturation*(2/np.pi)*np.arctan(k*(H_projection_1 + Hcoercivity))
+
+        if H_time_derivative_projection_2 >= 0:
+            HB_2 = Hsaturation*(2/np.pi)*np.arctan(k*(H_projection_2 - Hcoercivity))
+
+        else:
+            HB_2 = Hsaturation*(2/np.pi)*np.arctan(k*(H_projection_2 + Hcoercivity))
+
+        state_1 = np.tan(0.5*np.pi*HB_1/Hsaturation)
+        state_2 = np.tan(0.5*np.pi*HB_2/Hsaturation)
+        return state_1, state_2, H_projection_1, H_projection_2
+
+    def Rod_propagate_field(dt, H_eci_derivative, direction_1, direction_2, Hcoercivity, Hsaturation, H_projection_1, H_projection_2, k, state_1, state_2, i):
+
+
+        H_derivative_projection_1 = np.dot(H_eci_derivative[i], direction_1)
+
+        if H_derivative_projection_1 >= 0:
+            state_1 = state_1 + dt*k*(H_derivative_projection_1)*((H_projection_1 - state_1/k + Hcoercivity)/(2*Hcoercivity))**2
+        else:
+            state_1 = state_1 + dt*k*(H_derivative_projection_1)*((H_projection_1 - state_1/k - Hcoercivity)/(2*Hcoercivity))**2
+
+
+        H_derivative_projection_2 = np.dot(H_eci_derivative[i], direction_2)
+
+        if H_derivative_projection_2 >= 0:
+            state_2 = state_2 + dt*k*(H_derivative_projection_2)*((H_projection_2 - state_2/k + Hcoercivity)/(2*Hcoercivity))**2
+        else:
+            state_2 = state_2 + dt*k*(H_derivative_projection_2)*((H_projection_2 - state_2/k - Hcoercivity)/(2*Hcoercivity))**2
+
+        HB_1 = 2*Hsaturation*np.arctan(state_1)/np.pi
+        
+        HB_2 = 2*Hsaturation*np.arctan(state_2)/np.pi
+        
+        return HB_1, HB_2
+
+    
+
+
+    def permanent_magnet(remanence, volume):
+        B = remanence*volume
+        Itorque = np.zeros(3)
+        return B, Itorque
+
+    def compute_torque(mag_eci, Hvolume, HB_1, HB_2, Hdirection_1, Hdirection_2,direction, B, i, direction_1, direction_2, direction_0, q):
+        r = transformations.quat_to_rot_matrix(q)
+        Htorque_1 = np.cross(Hvolume*HB_1*direction_1, mag_eci[i])
+        Htorque_2 = np.cross(Hvolume*HB_2*direction_2, mag_eci[i])
+        Htorque = Htorque_1 + Htorque_2
+        Itorque = np.cross(direction_0 * B, mag_eci[i])
+        ttorque = Htorque + Itorque
+        torque = r.T @ ttorque  # Rotaciona o torque para o corpo
+        Bbody = (B*direction) + (HB_1*Hvolume*Hdirection_1) + (HB_2*Hvolume*Hdirection_2)
+        return Htorque, Itorque, torque, Bbody
+
+
+    def rotation (q, Hdirection_1, Hdirection_2, direction):
+       r = transformations.quat_to_rot_matrix(q)
+       direction_1 = r @ Hdirection_1
+       direction_2 = r @ Hdirection_2
+       direction_0 = r @ direction
+       return direction_1, direction_2, direction_0
+
+    # Funções auxiliares para cálculo das derivadas
+    def domega_dt(omega_vec):
+        ωx, ωy, ωz = omega_vec
+        dx = (torque[0] - (ωy * ωz * (Izz - Iyy))) / Ixx
+        dy = (torque[1] - (ωz * ωx * (Ixx - Izz))) / Iyy
+        dz = (torque[2] - (ωx * ωy * (Iyy - Ixx))) / Izz
+
+        return np.array([dx, dy, dz])
+    
+    def dq_dt(omega_vec, q_vec):
+        ωx, ωy, ωz = omega_vec
+        Omega_prime = np.array([
+            [ 0,    ωz,  -ωy,  ωx],
+            [-ωz,   0,   ωx,  ωy],
+            [ ωy, -ωx,   0,   ωz],
+            [-ωx, -ωy, -ωz,   0 ]
+        ])
+
+        return 0.5 * Omega_prime @ q_vec
+
+    HB_1, HB_2, state_1, state_2, k, velocity, Htorque = HysteresisRod(Hcoercivity, Hremanence, Hsaturation)
+    B, Itorque = permanent_magnet(remanence, volume)
+    
+    torque = np.zeros(3)
+    Bbody = np.zeros(3)
+
+
+    step = 0
+
+    for j in range(num_orbits):
+        a = j * num_points
+        for i in range(steps):
+
+
+            torque_hist.append(torque)
+            Itorque_hist.append(Itorque)
+            Htorque_hist.append(Htorque)
+            
+            direction_1, direction_2, direction_0 = rotation(q, Hdirection_1, Hdirection_2, direction)
+            state_1, state_2, H_projection_1, H_projection_2 = Rod_initial_condition(H_eci, H_eci_time_derivative, direction_1, direction_2, Hcoercivity, Hsaturation, k, i)
+
+            HB_1, HB_2 = Rod_propagate_field(dt, H_eci_derivative, direction_1, direction_2, Hcoercivity, Hsaturation, H_projection_1, H_projection_2, k, state_1, state_2, i)
+
+            Htorque, Itorque, torque, Bbody = compute_torque(mag_eci, Hvolume, HB_1, HB_2, Hdirection_1, Hdirection_2,direction, B, i, direction_1, direction_2, direction_0, q)
+
+            t = (a + i) * dt
+            time_hist.append(t)
+            omega_hist.append(omega.copy())
+            quat_hist.append(q.copy())
+            Bbody_hist.append(Bbody.copy())
+
+            # Integração RK4 para omega
+            k1_omega = domega_dt(omega)
+            k2_omega = domega_dt(omega + 0.5 * dt * k1_omega)
+            k3_omega = domega_dt(omega + 0.5 * dt * k2_omega)
+            k4_omega = domega_dt(omega + dt * k3_omega)
+            omega += (dt / 6.0) * (k1_omega + 2*k2_omega + 2*k3_omega + k4_omega)
+
+            # Integração RK4 para quaternion
+            k1_q = dq_dt(omega, q)
+            k2_q = dq_dt(omega, q + 0.5 * dt * k1_q)
+            k3_q = dq_dt(omega, q + 0.5 * dt * k2_q)
+            k4_q = dq_dt(omega, q + dt * k3_q)
+            q += (dt / 6.0) * (k1_q + 2*k2_q + 2*k3_q + k4_q)
+            
+            # Normalização do quaternion
+            q /= np.linalg.norm(q)
+
+            
+            print(f"progresso: {i + 1 + j * num_points}/{num_orbits * num_points} ({(i + 1 + j * num_points) / (num_orbits * num_points) * 100:.2f}%)")
+
+    return np.array(time_hist), np.array(omega_hist), np.array(quat_hist), np.array(Htorque_hist), np.array(Itorque_hist), np.array(torque_hist), np.array(Bbody_hist)
