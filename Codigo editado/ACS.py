@@ -19,27 +19,38 @@ class Magbody:    #inicia a classe Magbody
             self.Br = remanence #Tesla
             self.Bs = saturation_field #Tesla
             self.B = 0 #Tesla
+            self.k = (1/self.Hc)*np.tan(0.5*np.pi*self.Br/self.Bs)
             self.volume = volume #m^3
             self.direction = direction #unit vector
             self.space_direction = direction #unit vector
-            self.k = (1/self.Hc)*np.tan(0.5*np.pi*self.Br/self.Bs)
             
             self.magnetic_field_time_derivative = np.zeros(3) #Ampere/meter/second
+
+            # Constantes empíricas do Algoritmo de Flatley & Henretty (Pág 41 TCC)
+            self.q0 = 0.085
+            self.p = 4.75
             
 
             
         
         # atualiza o vetor campo magnético do bastão de histerese
-        def update_magnetic_field(self, dH, h_body): 
-            
-            if (dH @ self.direction) > 0:
-                self.B = (self.Bs*(2/np.pi)*np.arctan(self.k*((h_body @ self.direction)-self.Hc)))*self.volume #Tesla     
+        def update_magnetic_field(self, dH, h_body, dt, update_state=False): 
+
+            # Projeção escalar do campo e da derivada no eixo da barra
+            H_proj = h_body @ self.direction
+            dH_dt_proj = dH @ self.direction
+
+
+            if (dH_dt_proj) > 0:
+                self.B = (self.Bs*(2/np.pi)*np.arctan(self.k*(H_proj-self.Hc)))*self.volume #Tesla     
             else:
-                self.B = (self.Bs*(2/np.pi)*np.arctan(self.k*((h_body @ self.direction)+self.Hc)))*self.volume #Tesla
+                self.B = (self.Bs*(2/np.pi)*np.arctan(self.k*(H_proj+self.Hc)))*self.volume #Tesla
+            
+
             self.state = np.tan(0.5*np.pi*self.B/self.Bs)
+            
 
-
-
+            
 
 
     class PermanentMagnet: #inicia a classe PermanentMagnet
@@ -70,21 +81,23 @@ class Magbody:    #inicia a classe Magbody
 
 
 
-    def magnetic_moment(self, dH, h_body):
+    def magnetic_moment(self, dH, h_body, dt):
         total_magnetic_moment = np.zeros(3)
-
+        
         for rod in self.hysteresis_rods:
             if (dH @ rod.direction) == 0:
                 rod.B = rod.B
             else:
-                rod.update_magnetic_field(dH, h_body)
-            total_magnetic_moment += rod.B * rod.direction
+                rod.update_magnetic_field(dH, h_body, dt)
+            total_magnetic_moment += rod.B * rod.direction/(4*np.pi*(10**-7)) #A*m^2
+           
 
         for pm in self.permanent_magnets:
-            total_magnetic_moment += pm.B * pm.direction
+            total_magnetic_moment += pm.B * pm.direction/(4*np.pi*(10**-7)) #A*m^2
         return total_magnetic_moment
     
 
     #Utilizar a lista de B_body usando [i]
     def torque(self, B_body, m): 
         return np.cross(m, B_body)
+
