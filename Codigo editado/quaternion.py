@@ -31,10 +31,11 @@ def simulate_attitude(mag_x, mag_y, mag_z, I, omega0, q0, dt, steps):
     B_body = []
     H_body = []
  
+
  
     # Funções auxiliares para cálculo das derivadas
     def domega_dt(omega_vec, M):
-        ωz, ωy, ωx = omega_vec
+        ωx, ωy, ωz = omega_vec
         dx = (M[0] - (ωy * ωz * (Izz - Iyy))) / Ixx
         dy = (M[1] - (ωz * ωx * (Ixx - Izz))) / Iyy
         dz = (M[2] - (ωx * ωy * (Iyy - Ixx))) / Izz
@@ -43,10 +44,10 @@ def simulate_attitude(mag_x, mag_y, mag_z, I, omega0, q0, dt, steps):
     def dq_dt(omega_vec, q_vec):
         ωx, ωy, ωz = omega_vec
         Omega_prime = np.array([
-            [ 0,    ωz,  -ωy,  ωx],
-            [-ωz,   0,   ωx,  ωy],
-            [ ωy, -ωx,   0,   ωz],
-            [-ωx, -ωy, -ωz,   0 ]
+            [ 0,    -ωx,  -ωy,  -ωz],
+            [ ωx,   0,   ωz,  -ωy],
+            [ ωy,  -ωz,   0,   ωx],
+            [ ωz,   ωy,  -ωx,   0 ]
         ])
         return 0.5 * Omega_prime @ q_vec
  
@@ -55,10 +56,10 @@ def simulate_attitude(mag_x, mag_y, mag_z, I, omega0, q0, dt, steps):
  
     # Inicializa o sistema de controle ACS
     acs = Magbody()
-    acs.add_hysteresis_rod(coercivity=1.59, remanence=0.35,  saturation_field=0.73, volume=5*(10**-9), direction=np.array([1,0,0], dtype=np.float64)) #coercividade em Ampere/meter, remanência em Tesla, campo de saturação em Tesla, volume em m^3 e direção em unidade vetorial
-    acs.add_hysteresis_rod(coercivity=1.59, remanence=0.35,  saturation_field=0.73, volume=7*(10**-8), direction=np.array([0,1,0], dtype=np.float64)) #coercividade em Ampere/meter, remanência em Tesla, campo de saturação em Tesla, volume em m^3 e direção em unidade vetorial
-    acs.add_hysteresis_rod(coercivity=1.59, remanence=0.35,  saturation_field=0.73, volume=7*(10**-8), direction=np.array([0,0,1], dtype=np.float64)) #coercividade em Ampere/meter, remanência em Tesla, campo de saturação em Tesla, volume em m^3 e direção em unidade vetorial
-    acs.add_permanent_magnet(remanence=1.28, volume=(0.7), direction=np.array([1,0,0], dtype=np.float64)) #remanência em Tesla, volume em m^3 e direção em unidade vetorial
+    acs.add_hysteresis_rod(coercivity=1.59, remanence=0.35,  saturation_field=0.73, volume=0*5*(10**-9), direction=np.array([1,0,0], dtype=np.float64)) #coercividade em Ampere/meter, remanência em Tesla, campo de saturação em Tesla, volume em m^3 e direção em unidade vetorial
+    acs.add_hysteresis_rod(coercivity=1.59, remanence=0.35,  saturation_field=0.73, volume=0*7*(10**-8), direction=np.array([0,1,0], dtype=np.float64)) #coercividade em Ampere/meter, remanência em Tesla, campo de saturação em Tesla, volume em m^3 e direção em unidade vetorial
+    acs.add_hysteresis_rod(coercivity=1.59, remanence=0.35,  saturation_field=0.73, volume=0*7*(10**-8), direction=np.array([0,0,1], dtype=np.float64)) #coercividade em Ampere/meter, remanência em Tesla, campo de saturação em Tesla, volume em m^3 e direção em unidade vetorial
+    acs.add_permanent_magnet(remanence=1.28, volume=(0.7*(4*np.pi*(10**-7))/1.28), direction=np.array([1,0,0], dtype=np.float64)) #remanência em Tesla, volume em m^3 e direção em unidade vetorial
  
  
  
@@ -84,13 +85,13 @@ def simulate_attitude(mag_x, mag_y, mag_z, I, omega0, q0, dt, steps):
        
  
         # Atualizar estado do ACS
-        m = acs.magnetic_moment(dH, h_body)
+        m = acs.magnetic_moment(dH, h_body, dt)
  
  
         # Calcular torque magnético
         M = acs.torque(b_body, m)
  
-       
+        
         # Integração RK4 para omega
         k1_omega = domega_dt(omega, M)
         k2_omega = domega_dt(omega + 0.5 * dt * k1_omega, M)
@@ -105,10 +106,11 @@ def simulate_attitude(mag_x, mag_y, mag_z, I, omega0, q0, dt, steps):
         k3_q = dq_dt(omega, q + 0.5 * dt * k2_q)
         k4_q = dq_dt(omega, q + dt * k3_q)
         q += (dt / 6.0) * (k1_q + 2*k2_q + 2*k3_q + k4_q)
-           
+        
        
         # Normalização do quaternion
         q /= np.linalg.norm(q)
  
  
     return np.array(omega_hist), np.array(quat_hist), np.array(B_body), np.array(H_body)
+
