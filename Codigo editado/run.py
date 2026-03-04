@@ -12,15 +12,18 @@ import transformations
 ###################################################### 1. Simulação do Campo Magnético e Atitude do Satélite ######################################################
 
 # TLE do satélite
-s = '1 99999U 26092A   26092.50000000  .00000000  00000-0  00000-0 0  9990'
-t = '2 99999 040.0000 174.9269 0000000 025.2232 002.0151 15.1096    01'
+s = '1 99999U 26001A   26063.00000000  .00000000  00000-0  00000-0 0  9998'
+t = '2 99999 000.0000 000.0000 0000000 000.0000 000.0000 14.89000000    15'
 
 # Parâmetros da simulação
-num_points = 5400  # quantidade de pontos na órbita
+Tempo = 30000  # Duração total da simulação em segundos (3 horas)
+num_points = 30000  # quantidade de pontos na órbita
 start_date = datetime.datetime(2026, 10, 9, 12, 0, 0)
-
+"""
+ajustar o número de pontos para garantir que a simulação cubra todos os pontos em que o satélite vai passar.
+"""
 # ===== 1. Simulação do Campo Magnético =====
-times, east, north, down, lats, lons, alts = field_calc(s, t, num_points, start_date)
+times, east, north, down, lats, lons, alts, delta_t = field_calc(s, t, num_points, start_date, Tempo)
 
 # Plot dos componentes originais (opcional)
 plt.figure(figsize=(12, 6))
@@ -29,7 +32,7 @@ plt.plot(times, north, label='North (G)', marker='s')
 plt.plot(times, down, label='Down (G)', marker='^')
 plt.title('Componentes do Campo Magnético (WMM2020)')
 plt.xlabel('Tempo')
-plt.ylabel('Intensidade (Gauss)')
+plt.ylabel('Intensidade (Tesla)')
 plt.grid(True)
 plt.legend()
 plt.xticks(rotation=45)
@@ -76,9 +79,9 @@ mag_eci = np.array(mag_eci)
 
 # Perídodo de simulação e passo de tempo
 time_hist = []
-dt = 0.01                             # Passo de tempo [s]
-T = 2500                             # Duração total [s] 
-steps = int(T/dt)                # Número de passos de tempo
+dt = delta_t                           # Passo de tempo [s]
+T = Tempo                               # Duração total [s] 
+steps = int(T/dt)                       # Número de passos de tempo
 
 for i in range(steps):
     t = (i * dt)
@@ -132,7 +135,7 @@ q0 = [1, 0, 0, 0] 	      	          # Quaternion inicial
 
 
 # Executa simulação de atitude
-omega_hist, quat_hist, B_body, H_body = simulate_attitude(mag_x, mag_y, mag_z, I, omega0, q0, dt, steps)
+omega_hist, quat_hist, B_body_hist, H_body_hist = simulate_attitude(mag_x, mag_y, mag_z, I, omega0, q0, dt, steps)
 
 
 
@@ -183,9 +186,9 @@ plt.grid(True)
 
 # Gráfico do campo magnético em sistema de corpo
 plt.subplot(2, 1, 2)
-plt.plot(time_sim, B_body[:, 0], 'r-', label='Body X')
-plt.plot(time_sim, B_body[:, 1], 'g-', label='Body Y')
-plt.plot(time_sim, B_body[:, 2], 'b-', label='Body Z')
+plt.plot(time_sim, B_body_hist[:, 0], 'r-', label='Body X')
+plt.plot(time_sim, B_body_hist[:, 1], 'g-', label='Body Y')
+plt.plot(time_sim, B_body_hist[:, 2], 'b-', label='Body Z')
 plt.title('Campo Magnético no Sistema de Corpo do Satélite')
 plt.xlabel('Tempo (s)')
 plt.ylabel('Intensidade (Gauss)')
@@ -198,7 +201,7 @@ plt.show()
 # Gráfico 3D da trajetória do campo magnético no sistema de corpo
 fig = plt.figure(figsize=(10, 8))
 ax = fig.add_subplot(111, projection='3d')
-ax.plot(B_body[:, 0], B_body[:, 1], B_body[:, 2])
+ax.plot(B_body_hist[:, 0], B_body_hist[:, 1], B_body_hist[:, 2])
 ax.set_xlabel('Eixo X (Gauss)')
 ax.set_ylabel('Eixo Y (Gauss)')
 ax.set_zlabel('Eixo Z (Gauss)')
@@ -208,7 +211,7 @@ plt.show()
 
 # ===== 6. Análise Complementar =====
 # Calcular magnitude total do campo magnético
-mag_total = np.linalg.norm(B_body, axis=1)
+mag_total = np.linalg.norm(B_body_hist, axis=1)
 
 plt.figure(figsize=(10, 6))
 plt.plot(time_hist, mag_total, 'm-', linewidth=2)
@@ -220,9 +223,9 @@ plt.tight_layout()
 plt.show()
 
 # Calcular variações por eixo
-variation_x = np.max(B_body[:, 0]) - np.min(B_body[:, 0])
-variation_y = np.max(B_body[:, 1]) - np.min(B_body[:, 1])
-variation_z = np.max(B_body[:, 2]) - np.min(B_body[:, 2])
+variation_x = np.max(B_body_hist[:, 0]) - np.min(B_body_hist[:, 0])
+variation_y = np.max(B_body_hist[:, 1]) - np.min(B_body_hist[:, 1])
+variation_z = np.max(B_body_hist[:, 2]) - np.min(B_body_hist[:, 2])
 
 print("\nAnálise do Campo Magnético no Sistema de Corpo:")
 print(f"Variação no eixo X: {variation_x:.6f} Gauss")
