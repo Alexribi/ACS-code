@@ -15,8 +15,8 @@ def mag_in_body(mag_x, mag_y, mag_z, q):
        H_eci = B_eci / (4 * np.pi * 1e-7)  # Convertendo B (Tesla) para H (A/m)
         
         # Rotacionar para sistema de corpo
-       B_body = R @ B_eci
-       H_body = R @ H_eci
+       B_body = R.T @ B_eci
+       H_body = R.T @ H_eci
 
        return B_body, H_body
 
