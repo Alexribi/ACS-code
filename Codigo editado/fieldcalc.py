@@ -4,9 +4,9 @@ import matplotlib.pyplot as plt
 import datetime
 import geomag
 
-def field_calc(s, t, num_points, start_date):
+def field_calc(s, t, num_points, start_date, Tempo):
     satellite = Satrec.twoline2rv(s, t)
-    delta_t = 5400 / num_points
+    delta_t = Tempo / num_points
 
     times, east_vals, north_vals, down_vals = [], [], [], []
     lats, lons, alts = [], [], []
@@ -31,9 +31,9 @@ def field_calc(s, t, num_points, start_date):
 
             B = g.GeoMag(lat, lon, alt_km)
 
-            north_vals.append(B.bx * 1e-5) #Gauss
-            east_vals.append(B.by * 1e-5) #Gauss
-            down_vals.append(B.bz * 1e-5) #Gauss
+            north_vals.append(B.bx * 1e-9) #Tesla
+            east_vals.append(B.by * 1e-9) #Tesla
+            down_vals.append(B.bz * 1e-9) #Tesla
 
             times.append(current_time)
             lats.append(lat)
@@ -42,5 +42,7 @@ def field_calc(s, t, num_points, start_date):
         else:
             print(f"Erro SGP4 em {current_time}: código {e}")
 
-    return times, east_vals, north_vals, down_vals, lats, lons, alts
+    return times, east_vals, north_vals, down_vals, lats, lons, alts, delta_t
+
+
 
