@@ -2,16 +2,18 @@ from sgp4.api import Satrec, jday
 import numpy as np
 import matplotlib.pyplot as plt
 import datetime
-import geomag
+from pygeomag import GeoMag #Valida de 2026 até 2030
 
-def field_calc(s, t, num_points, start_date, Tempo):
+def field_calc(s, t, start_date, T, dt):
     satellite = Satrec.twoline2rv(s, t)
-    delta_t = Tempo / num_points
+    delta_t = dt
+    num_points = int(T / dt)
 
     times, east_vals, north_vals, down_vals = [], [], [], []
     lats, lons, alts = [], [], []
 
-    g = geomag.geomag.GeoMag()
+    # Inicializa o calculador moderno (já vem com WMM2025 nativo)
+    geo_mag = GeoMag()
 
     for i in range(num_points):
         current_time = start_date + datetime.timedelta(seconds=i * delta_t)
@@ -27,13 +29,19 @@ def field_calc(s, t, num_points, start_date, Tempo):
             norm_r = np.linalg.norm(r)
             lat = np.degrees(np.arcsin(z / norm_r))
             lon = np.degrees(np.arctan2(y, x))
-            alt_km = norm_r - 6371
+            alt_km = norm_r - 6371 # Raio médio da Terra
 
-            B = g.GeoMag(lat, lon, alt_km)
+            # pygeomag exige o tempo em Ano Decimal (ex: 2026.15)
+            day_of_year = current_time.timetuple().tm_yday
+            decimal_year = current_time.year + (day_of_year / 365.25)
 
-            north_vals.append(B.bx * 1e-9) #Tesla
-            east_vals.append(B.by * 1e-9) #Tesla
-            down_vals.append(B.bz * 1e-9) #Tesla
+            # Calcula o campo magnético com precisão de ponta
+            B = geo_mag.calculate(glat=lat, glon=lon, alt=alt_km, time=decimal_year)
+
+            # pygeomag retorna: x (Norte), y (Leste), z (Para baixo) em nanoTeslas
+            north_vals.append(B.x * 1e-9) #Tesla
+            east_vals.append(B.y * 1e-9) #Tesla
+            down_vals.append(B.z * 1e-9) #Tesla
 
             times.append(current_time)
             lats.append(lat)
@@ -42,7 +50,9 @@ def field_calc(s, t, num_points, start_date, Tempo):
         else:
             print(f"Erro SGP4 em {current_time}: código {e}")
 
-    return times, east_vals, north_vals, down_vals, lats, lons, alts, delta_t
+    return times, east_vals, north_vals, down_vals, lats, lons, alts
+
+
 
 
 
