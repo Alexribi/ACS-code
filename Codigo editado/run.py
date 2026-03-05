@@ -13,24 +13,24 @@ import transformations
 
 # TLE do satélite
 s = '1 99999U 26001A   26063.00000000  .00000000  00000-0  00000-0 0  9998'
-t = '2 99999 000.0000 000.0000 0000000 000.0000 000.0000 14.89000000    15'
+t = '2 99999 000.0000 000.0000 0000000 000.0000 000.0000 14.89000000    05'
 
 # Parâmetros da simulação
-Tempo = 30000  # Duração total da simulação em segundos (3 horas)
-num_points = 30000  # quantidade de pontos na órbita
+T = 10000  # Duração total da simulação em segundos (3 horas)
+dt = 0.1  # quantidade de pontos na órbita
 start_date = datetime.datetime(2026, 10, 9, 12, 0, 0)
 """
 ajustar o número de pontos para garantir que a simulação cubra todos os pontos em que o satélite vai passar.
 """
 # ===== 1. Simulação do Campo Magnético =====
-times, east, north, down, lats, lons, alts, delta_t = field_calc(s, t, num_points, start_date, Tempo)
+times, east, north, down, lats, lons, alts = field_calc(s, t, start_date, T, dt)
 
 # Plot dos componentes originais (opcional)
 plt.figure(figsize=(12, 6))
 plt.plot(times, east, label='East (G)', marker='o')
 plt.plot(times, north, label='North (G)', marker='s')
 plt.plot(times, down, label='Down (G)', marker='^')
-plt.title('Componentes do Campo Magnético (WMM2020)')
+plt.title('Componentes do Campo Magnético (WMM2025)')
 plt.xlabel('Tempo')
 plt.ylabel('Intensidade (Tesla)')
 plt.grid(True)
@@ -79,8 +79,6 @@ mag_eci = np.array(mag_eci)
 
 # Perídodo de simulação e passo de tempo
 time_hist = []
-dt = delta_t                           # Passo de tempo [s]
-T = Tempo                               # Duração total [s] 
 steps = int(T/dt)                       # Número de passos de tempo
 
 for i in range(steps):
@@ -236,3 +234,43 @@ print(f"Variação total: {np.max(mag_total) - np.min(mag_total):.6f} Gauss")
 
 
 #############################################################################################################################################
+
+
+################################################ 6. Erro de Apontamento (Ângulo com o Campo Magnético) ########################################################
+angulos_x = []
+angulos_y = []
+angulos_z = []
+
+for b_vec in B_body_hist:
+    norm_b = np.linalg.norm(b_vec)
+    if norm_b == 0:
+        ang_x, ang_y, ang_z = 0, 0, 0
+    else:
+        # np.clip previne erros de precisão de ponto flutuante no arccos
+        ang_x = np.degrees(np.arccos(np.clip(b_vec[0] / norm_b, -1.0, 1.0)))
+        ang_y = np.degrees(np.arccos(np.clip(b_vec[1] / norm_b, -1.0, 1.0)))
+        ang_z = np.degrees(np.arccos(np.clip(b_vec[2] / norm_b, -1.0, 1.0)))
+    
+    angulos_x.append(ang_x)
+    angulos_y.append(ang_y)
+    angulos_z.append(ang_z)
+
+# Usa o mesmo vetor de tempo do simulador e converte para horas
+tempo_horas = time_sim / 3600.0
+
+plt.figure(figsize=(10, 6))
+plt.plot(tempo_horas, angulos_x, label='Ângulo ao Eixo X (Ímã)', color='black', linewidth=0.8)
+plt.plot(tempo_horas, angulos_y, label='Ângulo ao Eixo Y', color='red', linewidth=0.8)
+plt.plot(tempo_horas, angulos_z, label='Ângulo ao Eixo Z', color='blue', linewidth=0.8)
+
+plt.title('Ângulo entre os Eixos do CubeSat e o Campo Geomagnético')
+plt.xlabel('Tempo (horas)')
+plt.ylabel('Ângulo (graus)')
+plt.grid(True)
+plt.legend(loc='center right')
+plt.xlim(0, max(tempo_horas))
+plt.ylim(0, 180)
+plt.yticks(range(0, 181, 20))
+plt.tight_layout()
+plt.show()
+
